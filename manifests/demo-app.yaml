@@ -56,7 +56,7 @@ spec:
         "beta.kubernetes.io/os": linux
       containers:
       - name: azure-vote-front
-        image: microsoft/azure-vote-front:v1
+        image: microsoft/azure-vote-front:v2
         resources:
           requests:
             cpu: 100m
