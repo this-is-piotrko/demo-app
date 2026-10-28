@@ -15,57 +15,92 @@
     bookingSecond: 0
   };
 
-  // Prevent running two copies simultaneously.
-  if (window.__deskBooker?.active) {
-    console.warn("Desk Booker is already running.");
-    return;
+  // Remove an earlier panel and cancel its timer.
+  if (window.__deskBooker) {
+    window.__deskBooker.stop?.();
   }
+
+  const previousPanel = document.getElementById(
+    "desk-booker-panel"
+  );
+  previousPanel?.remove();
 
   const state = {
     active: true,
     armed: false,
     timer: null,
-    submitted: false
+    submitted: false,
+    stop: null
   };
 
   window.__deskBooker = state;
 
-  const log = (...args) =>
-    console.log(`[DeskBooker ${new Date().toLocaleTimeString()}]`, ...args);
+  function log(...args) {
+    console.log(
+      `[DeskBooker ${new Date().toLocaleTimeString()}]`,
+      ...args
+    );
+  }
 
   function availableDesks() {
-    return [...document.querySelectorAll('input[type="radio"]')]
+    return [
+      ...document.querySelectorAll(
+        'input[type="radio"][name="desk"]'
+      )
+    ]
       .filter(el =>
-        el.name === "desk" &&
         !el.disabled &&
         el.closest("label")?.innerText.includes("Desk")
       )
       .map(el => ({
         element: el,
-        name: el.closest("label")?.innerText.match(/23\.D\d+/)?.[0]
+        name: el.closest("label")?.innerText
+          .match(/23\.D\d+/)?.[0]
       }))
       .filter(d => d.name);
   }
 
   function chooseDesk(desks) {
-    for (const name of CONFIG.preferredDesks) {
-      const match = desks.find(d => d.name === name);
-      if (match) return match;
+    for (const preferred of CONFIG.preferredDesks) {
+      const found = desks.find(
+        desk => desk.name === preferred
+      );
+
+      if (found) {
+        return found;
+      }
     }
+
     return desks[0] || null;
   }
 
+  function setStatus(message) {
+    const status = document.getElementById("db-status");
+
+    if (status) {
+      status.textContent = message;
+    }
+
+    log(message);
+  }
+
   function stop() {
-    if (state.timer) clearTimeout(state.timer);
+    if (state.timer !== null) {
+      clearTimeout(state.timer);
+    }
+
     state.timer = null;
     state.armed = false;
     state.active = false;
+
     log("Stopped.");
   }
 
+  state.stop = stop;
+
   function book(testMode = false) {
-    if (state.submitted) {
-      log("A booking attempt has already been submitted.");
+    if (!state.active || state.submitted) {
+      setStatus("Booking already submitted or stopped.");
       return;
     }
 
@@ -73,45 +108,60 @@
     const selected = chooseDesk(desks);
 
     if (!selected) {
-      log("No available desks found. No booking submitted.");
+      setStatus("No available desks found.");
       return;
     }
 
     const form = selected.element.form;
 
     if (!form || form.method.toLowerCase() !== "post") {
-      log("Expected POST booking form not found.");
+      setStatus("Booking POST form not found.");
       return;
     }
 
-    const submit = [...form.querySelectorAll(
-      'button, input[type="submit"]'
-    )].find(el =>
+    const submit = [
+      ...form.querySelectorAll(
+        'button, input[type="submit"]'
+      )
+    ].find(el =>
       el.name === "book" ||
       el.value === "Book" ||
       el.textContent?.trim() === "Book"
     );
 
-    if (!submit || submit.disabled) {
-      log("Booking submit button not found or disabled.");
+    if (!submit) {
+      setStatus("Book button not found.");
       return;
     }
 
+    // Important: select the desk FIRST.
     selected.element.click();
 
     log("Available desks:", desks.length);
     log("Selected desk:", selected.name);
 
-    if (testMode) {
-      const ok = confirm(
-        `TEST BOOKING\n\n` +
-        `Selected desk: ${selected.name}\n\n` +
-        `Please verify the date and time shown ` +
-        `on the portal before confirming.\n\n` +
-        `Click OK to submit the REAL booking.`
+    // The portal enables Book after desk selection.
+    if (submit.disabled) {
+      setStatus(
+        "Book button is still disabled after desk selection."
       );
-      if (!ok) {
-        log("Test booking cancelled.");
+      return;
+    }
+
+    setStatus(`Selected: ${selected.name}`);
+
+    if (testMode) {
+      const confirmed = confirm(
+        "REAL BOOKING TEST\n\n" +
+        `Desk: ${selected.name}\n\n` +
+        "Check the selected DATE and HOURS " +
+        "in the Modo Labs portal.\n\n" +
+        "OK = submit the REAL booking.\n" +
+        "Cancel = do not submit."
+      );
+
+      if (!confirmed) {
+        setStatus("Test cancelled. No booking submitted.");
         return;
       }
     }
@@ -119,12 +169,15 @@
     state.submitted = true;
     state.armed = false;
 
-    log("Submitting booking for", selected.name);
+    setStatus(`Submitting booking: ${selected.name}`);
+
+    // Use the portal's native booking button.
     submit.click();
   }
 
   function nextTenAM() {
     const target = new Date();
+
     target.setHours(
       CONFIG.bookingHour,
       CONFIG.bookingMinute,
@@ -132,29 +185,38 @@
       0
     );
 
-    if (target <= new Date()) {
+    if (target.getTime() <= Date.now()) {
       target.setDate(target.getDate() + 1);
     }
+
     return target;
   }
 
   function arm() {
-    if (state.armed || state.submitted) return;
+    if (!state.active || state.armed || state.submitted) {
+      return;
+    }
 
     const target = nextTenAM();
-    const delay = target.getTime() - Date.now();
 
     state.armed = true;
-    log("Armed for:", target.toLocaleString());
 
-    // Short final timer to limit drift.
+    setStatus(
+      "Armed for " + target.toLocaleString()
+    );
+
     function tick() {
-      if (!state.armed) return;
+      if (!state.active || !state.armed) {
+        return;
+      }
 
       const remaining = target.getTime() - Date.now();
 
       if (remaining <= 0) {
         state.timer = null;
+        state.armed = false;
+
+        setStatus("10:00 reached. Starting booking...");
         book(false);
         return;
       }
@@ -168,57 +230,89 @@
     tick();
   }
 
-  // Small on-page control panel.
+  // Build on-page panel.
   const panel = document.createElement("div");
+
   panel.id = "desk-booker-panel";
+
   panel.style.cssText = `
-    position:fixed;
-    right:20px;
-    bottom:20px;
-    z-index:2147483647;
-    background:#17212b;
-    color:white;
-    padding:16px;
-    border-radius:12px;
-    font:13px Arial,sans-serif;
-    box-shadow:0 4px 20px #0006;
-    width:260px;
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 2147483647;
+    width: 280px;
+    padding: 16px;
+    background: #17212b;
+    color: #ffffff;
+    border-radius: 12px;
+    font: 13px Arial, sans-serif;
+    box-shadow: 0 4px 20px rgba(0,0,0,.4);
   `;
 
   panel.innerHTML = `
-    <div style="font-weight:bold;font-size:16px;margin-bottom:8px">
-      Desk Booker
+    <div style="
+      font-size: 16px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    ">
+      Desk Booker v1.1
     </div>
-    <div id="db-status" style="margin-bottom:12px">
-      Ready. Select your booking date first.
+
+    <div id="db-status" style="
+      margin-bottom: 12px;
+      line-height: 1.5;
+    ">
+      Initializing...
     </div>
-    <button id="db-test" type="button">TEST NOW</button>
-    <button id="db-arm" type="button">ARM 10:00</button>
-    <button id="db-stop" type="button">STOP</button>
+
+    <div id="db-count" style="
+      margin-bottom: 12px;
+      color: #b6c8d6;
+    "></div>
+
+    <button id="db-test" type="button">
+      TEST NOW
+    </button>
+
+    <button id="db-arm" type="button">
+      ARM 10:00
+    </button>
+
+    <button id="db-stop" type="button">
+      STOP
+    </button>
   `;
 
   document.body.appendChild(panel);
 
-  const status = panel.querySelector("#db-status");
-
   panel.querySelectorAll("button").forEach(button => {
     button.style.cssText = `
-      padding:7px;
-      margin:3px;
-      border:0;
-      border-radius:5px;
-      cursor:pointer;
+      padding: 8px 10px;
+      margin: 3px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
     `;
   });
 
+  const count = panel.querySelector("#db-count");
+
+  function refreshCount() {
+    const desks = availableDesks();
+
+    count.textContent =
+      `Available desks in current form: ${desks.length}`;
+  }
+
   panel.querySelector("#db-test").onclick = () => {
-    status.textContent = "Running test booking...";
+    refreshCount();
     book(true);
   };
 
   panel.querySelector("#db-arm").onclick = () => {
+    refreshCount();
     arm();
-    status.textContent = "Armed for next 10:00. Keep this tab open.";
   };
 
   panel.querySelector("#db-stop").onclick = () => {
@@ -226,5 +320,6 @@
     panel.remove();
   };
 
-  log("Ready. Available desks:", availableDesks().length);
+  refreshCount();
+  setStatus("Ready. Select the booking date first.");
 })();
