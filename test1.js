@@ -1,23 +1,18 @@
-window.deskSnapshot = () => {
-  const desks = [...document.querySelectorAll(
-    'input[type="radio"][name="desk"]'
-  )];
+window.afterApply = deskSnapshot();
 
-  return {
-    timestamp: new Date().toLocaleTimeString(),
-    count: desks.length,
-    enabled: desks.filter(d => !d.disabled).length,
-    desks: desks.map(d => ({
-      name: d.closest("label")?.innerText.match(/23\.D\d+/)?.[0],
-      value: d.value,
-      disabled: d.disabled
-    }))
-  };
-};
-
-window.beforeApply = deskSnapshot();
-
-console.log("BEFORE APPLY:", {
-  count: beforeApply.count,
-  enabled: beforeApply.enabled
+console.log("AFTER APPLY:", {
+  count: afterApply.count,
+  enabled: afterApply.enabled
 });
+
+console.log(
+  "Changed:",
+  JSON.stringify(beforeApply.desks) !==
+  JSON.stringify(afterApply.desks)
+);
+
+console.log(
+  "Same DOM element:",
+  document.querySelector('input[name="desk"]') ===
+  undefined
+);
