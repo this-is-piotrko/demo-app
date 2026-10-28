@@ -1,7 +1,7 @@
-window.deskBeforeElement =
+const deskAfterElement =
   document.querySelector('input[name="desk"]');
 
-window.deskBeforeValues = [
+const deskAfterValues = [
   ...document.querySelectorAll('input[name="desk"]')
 ].map(el => ({
   name: el.closest("label")?.innerText.match(/23\.D\d+/)?.[0],
@@ -9,4 +9,14 @@ window.deskBeforeValues = [
   disabled: el.disabled
 }));
 
-console.log("Snapshot saved:", deskBeforeValues.length);
+console.log("DOM replaced:",
+  deskBeforeElement !== deskAfterElement
+);
+
+console.log("Desk data changed:",
+  JSON.stringify(deskBeforeValues) !==
+  JSON.stringify(deskAfterValues)
+);
+
+console.log("Before:", deskBeforeValues.length);
+console.log("After:", deskAfterValues.length);
